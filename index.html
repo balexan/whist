@@ -116,6 +116,32 @@
     font-style: normal;
     font-weight: bold;
   }
+
+  /* Inline outcome picker shown in the score cell when the row is fully
+     bid but no outcome has been chosen yet. */
+  .inline-outcome {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    justify-content: center;
+    padding: 2px;
+  }
+  .inline-outcome button {
+    border: 1px solid #bbb;
+    background: white;
+    color: #1f1f1f;
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 11px;
+    line-height: 1.1;
+    cursor: pointer;
+    font-family: inherit;
+    min-width: 22px;
+  }
+  .inline-outcome button:hover {
+    border-color: var(--accent);
+    background: #fff4f4;
+  }
   .controls {
     text-align: center;
     margin-top: 16px;
@@ -250,8 +276,10 @@
         <tr :class="{ 'section-end': row.sectionEnd }">
           <td
             class="cards-col"
-            :class="{ impossible: rowImpossible(rIdx) }"
-            :title="rowImpossible(rIdx) ? `Bids + outcomes can't sum to ${row.cards} tricks — check the entries.` : ''"
+            :class="{ impossible: bidsIllegal(rIdx) || rowImpossible(rIdx) }"
+            :title="bidsIllegal(rIdx)
+              ? `Bids sum to ${row.cards} — someone must miss. The dealer should change their bid.`
+              : (rowImpossible(rIdx) ? `Bids + outcomes can't sum to ${row.cards} tricks — check the entries.` : '')"
             x-text="row.cards"
           ></td>
           <template x-for="pIdx in players.length" :key="pIdx">
@@ -269,11 +297,15 @@
                     :value="bids[rIdx]?.[pIdx-1] ?? ''"
                     @input="setBid(rIdx, pIdx-1, $event.target.value)"
                   >
-                  <!-- Chevron is only available once every player in this row has bid. -->
+                  <!-- Chevron is only available once every player in this
+                       row has bid AND this player already has an outcome
+                       (i.e., the inline picker isn't taking over the
+                       score cell). It's the override path: re-edit a
+                       past outcome. -->
                   <button
                     type="button"
                     class="bid-menu-btn"
-                    x-show="rowComplete(rIdx)"
+                    x-show="rowComplete(rIdx) && (outcomes[rIdx]?.[pIdx-1] !== null && outcomes[rIdx]?.[pIdx-1] !== undefined)"
                     @click.stop="togglePopup(rIdx, pIdx-1)"
                     title="Set outcome"
                   >▾</button>
@@ -304,7 +336,25 @@
                   :class="{ 'has-value': scores[rIdx]?.[pIdx-1] !== null && scores[rIdx]?.[pIdx-1] !== undefined }"
                   style="flex: 1; padding: 6px 4px;"
                 >
-                  <span x-text="scores[rIdx]?.[pIdx-1] ?? '–'"></span>
+                  <!-- Inline outcome picker: shown when every player in
+                       the row has bid but THIS player has no outcome and
+                       no score yet. -->
+                  <template x-if="rowComplete(rIdx) && (outcomes[rIdx]?.[pIdx-1] === null || outcomes[rIdx]?.[pIdx-1] === undefined)">
+                    <div class="inline-outcome">
+                      <template x-for="opt in outcomeOptions(row.cards)" :key="opt.value">
+                        <button
+                          type="button"
+                          @click="setOutcome(rIdx, pIdx-1, opt.value)"
+                          x-text="opt.value === 0 ? 'c' : '-' + opt.value"
+                          :title="opt.label"
+                        ></button>
+                      </template>
+                    </div>
+                  </template>
+                  <!-- Otherwise: the score itself (or the dash placeholder). -->
+                  <template x-if="!(rowComplete(rIdx) && (outcomes[rIdx]?.[pIdx-1] === null || outcomes[rIdx]?.[pIdx-1] === undefined))">
+                    <span x-text="scores[rIdx]?.[pIdx-1] ?? '–'"></span>
+                  </template>
                 </div>
               </div>
             </td>
@@ -493,6 +543,23 @@
         if (feasible) {
           for (const p of unset) outs[p] = 0;
         }
+      },
+
+      // Romanian Whist forbids the bids from summing to exactly the number
+      // of tricks — someone (typically the dealer) is forced to bid a
+      // value that makes the round un-winnable for at least one player.
+      // We only flag once every bid is entered.
+      bidsIllegal(r) {
+        const n = this.players.length;
+        const bids = this.bids[r];
+        if (!bids) return false;
+        let sum = 0;
+        for (let p = 0; p < n; p++) {
+          const v = bids[p];
+          if (v === null || v === undefined) return false;
+          sum += v;
+        }
+        return sum === this.rows[r].cards;
       },
 
       // True only when the row is fully scored AND there is no combination

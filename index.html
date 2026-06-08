@@ -428,8 +428,71 @@
       setOutcome(r, p, value) {
         if (!this.outcomes[r]) this.outcomes[r] = [];
         this.outcomes[r][p] = value;
+        this.autoFillCorrect(r);
         this.recalcScores();
         this.closePopup();
+      },
+
+      // After a user picks an outcome, check whether the already-marked
+      // outcomes on this row can satisfy the trick count assuming every
+      // still-unset player will play exactly their bid (i.e., "correct").
+      // If yes, mark those unset players as correct automatically — the
+      // round is mathematically pinned.
+      //
+      // We only auto-fill when the row already has at least one non-zero
+      // outcome (otherwise filling everyone "correct" is a guess, not a
+      // deduction) AND every player has a bid entered.
+      autoFillCorrect(r) {
+        const n = this.players.length;
+        const bids = this.bids[r], outs = this.outcomes[r];
+        if (!bids || !outs) return;
+        // Need every bid entered.
+        for (let p = 0; p < n; p++) {
+          if (bids[p] === null || bids[p] === undefined) return;
+        }
+        // Find unset players; require at least one set non-zero outcome
+        // (the trigger condition — "the not correct results sum up").
+        const unset = [];
+        let hasNonZero = false;
+        for (let p = 0; p < n; p++) {
+          if (outs[p] === null || outs[p] === undefined) unset.push(p);
+          else if (outs[p] > 0) hasNonZero = true;
+        }
+        if (unset.length === 0) return;     // nothing to fill
+        if (!hasNonZero) return;             // no non-zero outcomes yet
+        // Hypothetically set unset players to correct and test feasibility.
+        // Each set player p contributes bids[p] + outs[p] in the "all
+        // overshot" baseline, with the option to flip 2*outs[p] off.
+        // Each unset player (assumed correct) contributes exactly bids[p].
+        let sumOver = 0;
+        const flips = [];
+        for (let p = 0; p < n; p++) {
+          if (outs[p] === null || outs[p] === undefined) {
+            sumOver += bids[p];                     // assumed correct
+          } else {
+            sumOver += bids[p] + outs[p];
+            if (outs[p] > 0) flips.push(2 * outs[p]);
+          }
+        }
+        const cards = this.rows[r].cards;
+        const target = sumOver - cards;
+        if (target < 0) return;
+        let feasible = false;
+        if (target === 0) {
+          feasible = true;
+        } else {
+          const reachable = new Uint8Array(target + 1);
+          reachable[0] = 1;
+          for (const v of flips) {
+            for (let s = target; s >= v; s--) {
+              if (reachable[s - v]) reachable[s] = 1;
+            }
+          }
+          feasible = !!reachable[target];
+        }
+        if (feasible) {
+          for (const p of unset) outs[p] = 0;
+        }
       },
 
       // True only when the row is fully scored AND there is no combination

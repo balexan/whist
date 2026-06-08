@@ -220,7 +220,7 @@
 </head>
 <body x-data="whist()" x-init="init()">
   <h1>ROMANIAN WHIST</h1>
-  <div class="subtitle">Enter 3 to 6 player names below to begin</div>
+  <div class="subtitle" x-show="!rosterLocked">Enter 3 to 6 player names below to begin</div>
 
   <table>
     <thead>

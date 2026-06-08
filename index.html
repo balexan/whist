@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Romanian Whist — Score Table</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root {
+    --border: #2a2a2a;
+    --bg: #fafaf7;
+    --row-alt: #f0ede4;
+    --header-bg: #1f1f1f;
+    --header-fg: #fafaf7;
+    --accent: #b22222;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    background: var(--bg);
+    margin: 0;
+    padding: 24px;
+    color: #1f1f1f;
+  }
+  h1 {
+    text-align: center;
+    margin: 0 0 8px 0;
+    font-size: 32px;
+    letter-spacing: 2px;
+    color: var(--accent);
+  }
+  .subtitle {
+    text-align: center;
+    margin-bottom: 24px;
+    color: #555;
+    font-style: italic;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    text-align: center;
+  }
+  thead th {
+    background: var(--header-bg);
+    color: var(--header-fg);
+    padding: 8px;
+  }
+  .name-input {
+    font-size: 26px;
+    font-weight: bold;
+    text-align: center;
+    background: transparent;
+    color: var(--header-fg);
+    border: none;
+    border-bottom: 2px dashed #777;
+    width: 180px;
+    padding: 4px;
+    font-family: inherit;
+  }
+  .name-input:focus {
+    outline: none;
+    border-bottom-color: var(--accent);
+    background: rgba(255,255,255,0.05);
+  }
+  .sub-header th {
+    background: #3a3a3a;
+    font-size: 12px;
+    font-weight: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 4px 8px;
+  }
+  .cards-col {
+    background: var(--header-bg);
+    color: var(--header-fg);
+    font-weight: bold;
+    width: 70px;
+  }
+  /* When the row's bids+outcomes can't possibly sum to the trick count,
+     the cards cell flashes red so it's obvious something was mis-entered. */
+  .cards-col.impossible {
+    background: #b22222;
+    color: #fff;
+    cursor: help;
+  }
+  tbody tr:nth-child(even) td:not(.cards-col) {
+    background: var(--row-alt);
+  }
+  .trick-input {
+    width: 56px;
+    text-align: center;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 4px;
+    font-family: inherit;
+  }
+  .trick-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .score-cell {
+    width: 70px;
+    color: #888;
+    font-style: italic;
+  }
+  /* A computed score is shown plainly, no italics. */
+  .score-cell.has-value {
+    color: #1f1f1f;
+    font-style: normal;
+    font-weight: bold;
+  }
+  .controls {
+    text-align: center;
+    margin-top: 16px;
+    color: #666;
+    font-size: 14px;
+  }
+  .name-cell {
+    padding: 4px 8px;
+  }
+  .empty-msg {
+    text-align: center;
+    margin-top: 24px;
+    padding: 16px;
+    color: #999;
+    font-style: italic;
+  }
+  .player-start {
+    border-left: 3px double var(--border) !important;
+  }
+  /* Thick divider after each section of rounds (after n×1, 2..7, n×8, 7..2). */
+  tbody tr.section-end td {
+    border-bottom: 3px double var(--border);
+  }
+
+  /* Bid-cell wrapper: position context for the popup. */
+  .bid-wrap {
+    position: relative;
+    flex: 1;
+    padding: 6px 4px;
+    border-right: 1px solid var(--border);
+    transition: background 120ms ease;
+  }
+  /* Outcome tints. White = correct; yellow → orange → red as misses grow. */
+  .bid-wrap.outcome-0  { background: #ffffff; }
+  .bid-wrap.outcome-1  { background: #fff4a3; }
+  .bid-wrap.outcome-2  { background: #ffe066; }
+  .bid-wrap.outcome-3  { background: #ffb84d; }
+  .bid-wrap.outcome-4  { background: #ff8c1a; }
+  .bid-wrap.outcome-5  { background: #ff5c1a; }
+  .bid-wrap.outcome-6  { background: #e63900; }
+  .bid-wrap.outcome-7  { background: #b32d00; color: #fff; }
+  .bid-wrap.outcome-8  { background: #802000; color: #fff; }
+
+  /* Tiny chevron button shown only when the row is complete. */
+  .bid-menu-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid #999;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.85);
+    color: #333;
+    font-size: 10px;
+    line-height: 14px;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .bid-menu-btn:hover {
+    background: white;
+    border-color: var(--accent);
+  }
+
+  /* Popup panel anchored under the bid input. */
+  .outcome-popup {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 80px;
+  }
+  .outcome-popup button {
+    border: none;
+    background: transparent;
+    padding: 4px 8px;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .outcome-popup button:hover {
+    background: #eee;
+  }
+  .outcome-popup button.selected {
+    background: var(--accent);
+    color: white;
+  }
+</style>
+</head>
+<body x-data="whist()" x-init="init()">
+  <h1>ROMANIAN WHIST</h1>
+  <div class="subtitle">Enter 3 to 6 player names below to begin</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="cards-col" rowspan="2">Cards</th>
+        <template x-for="i in visibleSlotCount" :key="'name-'+i">
+          <th class="name-cell player-start" colspan="2">
+            <input
+              type="text"
+              class="name-input"
+              :placeholder="'Player ' + i"
+              x-model="names[i-1]"
+            >
+          </th>
+        </template>
+      </tr>
+      <tr class="sub-header">
+        <template x-for="i in visibleSlotCount" :key="'sub-'+i">
+          <th class="player-start" colspan="2">
+            <span style="display: inline-block; width: 50%;">Bid</span><span style="display: inline-block; width: 50%;">Score</span>
+          </th>
+        </template>
+      </tr>
+    </thead>
+    <tbody>
+      <template x-for="(row, rIdx) in rows" :key="rIdx">
+        <tr :class="{ 'section-end': row.sectionEnd }">
+          <td
+            class="cards-col"
+            :class="{ impossible: rowImpossible(rIdx) }"
+            :title="rowImpossible(rIdx) ? `Bids + outcomes can't sum to ${row.cards} tricks — check the entries.` : ''"
+            x-text="row.cards"
+          ></td>
+          <template x-for="pIdx in players.length" :key="pIdx">
+            <td class="player-start" colspan="2" style="padding: 0;">
+              <div style="display: flex;">
+                <div
+                  class="bid-wrap"
+                  :class="outcomeClass(rIdx, pIdx-1)"
+                >
+                  <input
+                    type="number"
+                    class="trick-input"
+                    min="0"
+                    :max="row.cards"
+                    :value="bids[rIdx]?.[pIdx-1] ?? ''"
+                    @input="setBid(rIdx, pIdx-1, $event.target.value)"
+                  >
+                  <!-- Chevron is only available once every player in this row has bid. -->
+                  <button
+                    type="button"
+                    class="bid-menu-btn"
+                    x-show="rowComplete(rIdx)"
+                    @click.stop="togglePopup(rIdx, pIdx-1)"
+                    title="Set outcome"
+                  >▾</button>
+                  <!-- Outcome popup. -->
+                  <div
+                    class="outcome-popup"
+                    x-show="popup.r === rIdx && popup.p === pIdx-1"
+                    @click.outside="closePopup()"
+                    x-transition.opacity
+                  >
+                    <template x-for="opt in outcomeOptions(row.cards)" :key="opt.value">
+                      <button
+                        type="button"
+                        :class="{ selected: outcomes[rIdx]?.[pIdx-1] === opt.value }"
+                        @click="setOutcome(rIdx, pIdx-1, opt.value)"
+                        x-text="opt.label"
+                      ></button>
+                    </template>
+                    <button
+                      type="button"
+                      style="border-top: 1px solid #eee; margin-top: 2px; padding-top: 6px; color: #888;"
+                      @click="setOutcome(rIdx, pIdx-1, null)"
+                    >clear</button>
+                  </div>
+                </div>
+                <div
+                  class="score-cell"
+                  :class="{ 'has-value': scores[rIdx]?.[pIdx-1] !== null && scores[rIdx]?.[pIdx-1] !== undefined }"
+                  style="flex: 1; padding: 6px 4px;"
+                >
+                  <span x-text="scores[rIdx]?.[pIdx-1] ?? '–'"></span>
+                </div>
+              </div>
+            </td>
+          </template>
+        </tr>
+      </template>
+    </tbody>
+  </table>
+
+  <div x-show="players.length < 3" class="empty-msg">
+    <span x-text="`Enter at least ${3 - players.length} more name${(3 - players.length) === 1 ? '' : 's'} to generate the score table.`"></span>
+  </div>
+
+  <div class="controls">
+    <span x-text="`${players.length} player${players.length === 1 ? '' : 's'} · ${rows.length} game${rows.length === 1 ? '' : 's'}`"></span>
+  </div>
+
+<script>
+  function whist() {
+    return {
+      maxPlayers: 6,
+      names: ['', '', '', '', '', ''],
+      bids: [],
+      scores: [],
+      // Per-cell outcome: null = unset, 0 = correct, 1..cards = number of tricks missed (a "minus").
+      outcomes: [],
+      // Which outcome popup is open (-1/-1 = none).
+      popup: { r: -1, p: -1 },
+
+      get players() {
+        return this.names.map(n => (n || '').trim()).filter(n => n.length > 0);
+      },
+
+      // Show all filled name slots plus one empty slot for typing the next,
+      // capped at maxPlayers. Always at least 1 visible slot so the user
+      // can start typing. Once the game has started — i.e., any row has all
+      // its bids entered — we lock the roster by hiding the trailing empty
+      // slot, so no new player can join mid-game.
+      get visibleSlotCount() {
+        const filled = this.players.length;
+        const canAddMore = filled < this.maxPlayers && !this.rosterLocked;
+        return Math.max(1, filled + (canAddMore ? 1 : 0));
+      },
+
+      // True once any row has a bid from every player — at that point the
+      // game has started and the player list is frozen.
+      get rosterLocked() {
+        for (let r = 0; r < this.rows.length; r++) {
+          if (this.rowComplete(r)) return true;
+        }
+        return false;
+      },
+
+      // Whist round structure for n players:
+      //   n × (1-card), then 2..7, then n × (8-card), then 7..2, then n × (1-card)
+      // A divider is drawn after every n consecutive rows (so for n=3 the
+      // dividers fall after rows 3, 6, 9, ...). The final row needs no
+      // divider — the table's bottom border closes it.
+      get rows() {
+        const n = this.players.length;
+        if (n < 3) return [];
+        const out = [];
+        for (let i = 0; i < n; i++) out.push({ cards: 1 });
+        for (let c = 2; c <= 7; c++) out.push({ cards: c });
+        for (let i = 0; i < n; i++) out.push({ cards: 8 });
+        for (let c = 7; c >= 2; c--) out.push({ cards: c });
+        for (let i = 0; i < n; i++) out.push({ cards: 1 });
+        for (let i = 0; i < out.length; i++) {
+          if ((i + 1) % n === 0 && i !== out.length - 1) {
+            out[i].sectionEnd = true;
+          }
+        }
+        return out;
+      },
+
+      setBid(r, p, val) {
+        if (!this.bids[r]) this.bids[r] = [];
+        this.bids[r][p] = val === '' ? null : Number(val);
+        // Editing a bid invalidates the previously chosen outcome.
+        if (this.outcomes[r]) this.outcomes[r][p] = null;
+        this.recalcScores();
+      },
+
+      // True once every player has a bid for this row.
+      rowComplete(r) {
+        const n = this.players.length;
+        if (!this.bids[r]) return false;
+        for (let p = 0; p < n; p++) {
+          const v = this.bids[r][p];
+          if (v === null || v === undefined || Number.isNaN(v)) return false;
+        }
+        return true;
+      },
+
+      // Options for the popup at a given card count: correct, -1, ..., -cards.
+      outcomeOptions(cards) {
+        const opts = [{ value: 0, label: 'correct' }];
+        for (let m = 1; m <= cards; m++) opts.push({ value: m, label: '-' + m });
+        return opts;
+      },
+
+      // CSS class driving the bid-cell tint.
+      outcomeClass(r, p) {
+        const v = this.outcomes[r]?.[p];
+        if (v === null || v === undefined) return '';
+        return 'outcome-' + Math.min(v, 8);
+      },
+
+      togglePopup(r, p) {
+        if (this.popup.r === r && this.popup.p === p) {
+          this.closePopup();
+        } else {
+          this.popup = { r, p };
+        }
+      },
+
+      closePopup() {
+        this.popup = { r: -1, p: -1 };
+      },
+
+      setOutcome(r, p, value) {
+        if (!this.outcomes[r]) this.outcomes[r] = [];
+        this.outcomes[r][p] = value;
+        this.recalcScores();
+        this.closePopup();
+      },
+
+      // True only when the row is fully scored AND there is no combination
+      // of over/under signs for the non-zero outcomes that makes
+      //     Σ actual_i == cards
+      // Each player's actual trick count is either bid+outcome (overshot)
+      // or bid−outcome (undershot); a "correct" outcome (0) is locked at
+      // bid exactly. We start by assuming everyone overshot
+      // (sum = Σ(b+o)) and ask: is there a subset of the non-zero
+      // outcomes whose 2*o values sum to (sum − cards)? Standard
+      // subset-sum, tiny in size (≤ 6 items, target ≤ 96), so a
+      // boolean DP is fine.
+      rowImpossible(r) {
+        const n = this.players.length;
+        if (n === 0) return false;
+        // Need every player to have a computed score before validating.
+        for (let p = 0; p < n; p++) {
+          const s = this.scores[r]?.[p];
+          if (s === null || s === undefined) return false;
+        }
+        const cards = this.rows[r].cards;
+        const bids = this.bids[r], outs = this.outcomes[r];
+        let sumOver = 0;
+        const flips = []; // 2*o for each non-zero outcome
+        for (let p = 0; p < n; p++) {
+          sumOver += bids[p] + outs[p];
+          if (outs[p] > 0) flips.push(2 * outs[p]);
+        }
+        const target = sumOver - cards;
+        if (target < 0) return true;            // even all-overshot undershoots cards
+        if (target === 0) return false;         // all overshot exactly hits
+        // Subset-sum on `flips` for `target`.
+        const reachable = new Uint8Array(target + 1);
+        reachable[0] = 1;
+        for (const v of flips) {
+          for (let s = target; s >= v; s--) {
+            if (reachable[s - v]) reachable[s] = 1;
+          }
+        }
+        return !reachable[target];
+      },
+
+      // Score rules (Romanian Whist):
+      //   - correct (outcome 0):   prev + 5 + bid
+      //   - wrong   (outcome x>0): prev - x*(x+1)/2   (i.e. -1, -3, -6, -10, ...)
+      //   `prev` is the score in the row directly above for the same player,
+      //   or 0 for the first row. If the row above for this player has no
+      //   computed score yet (its outcome isn't set), this row also stays
+      //   blank — scoring propagates strictly top-to-bottom.
+      recalcScores() {
+        const rowCount = this.rows.length;
+        const n = this.players.length;
+        const next = [];
+        for (let r = 0; r < rowCount; r++) {
+          const row = [];
+          for (let p = 0; p < n; p++) {
+            const outcome = this.outcomes[r]?.[p];
+            const bid = this.bids[r]?.[p];
+            if (outcome === null || outcome === undefined ||
+                bid === null || bid === undefined) {
+              row.push(null);
+              continue;
+            }
+            const prev = r === 0 ? 0 : next[r - 1][p];
+            if (prev === null) {
+              row.push(null);
+              continue;
+            }
+            const delta = outcome === 0
+              ? 5 + bid
+              : -(outcome * (outcome + 1) / 2);
+            row.push(prev + delta);
+          }
+          next.push(row);
+        }
+        this.scores = next;
+      },
+
+      // Resize the bids/scores/outcomes matrices when the player count or row
+      // count changes. Existing values are preserved for cells that still exist.
+      resizeBids() {
+        const rowCount = this.rows.length;
+        const n = this.players.length;
+        const newBids = [];
+        const newOutcomes = [];
+        for (let r = 0; r < rowCount; r++) {
+          const bidRow = [];
+          const outRow = [];
+          for (let p = 0; p < n; p++) {
+            bidRow.push(this.bids[r]?.[p] ?? null);
+            outRow.push(this.outcomes[r]?.[p] ?? null);
+          }
+          newBids.push(bidRow);
+          newOutcomes.push(outRow);
+        }
+        this.bids = newBids;
+        this.outcomes = newOutcomes;
+        this.recalcScores();
+      },
+
+      init() {
+        this.resizeBids();
+        this.$watch('names', () => this.resizeBids());
+      }
+    };
+  }
+</script>
+</body>
+</html>

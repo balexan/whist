@@ -245,8 +245,27 @@
 </style>
 </head>
 <body x-data="whist()" x-init="init()">
-  <h1>ROMANIAN WHIST</h1>
+  <h1 x-show="!rosterLocked">ROMANIAN WHIST</h1>
   <div class="subtitle" x-show="!rosterLocked">Enter 3 to 6 player names below to begin</div>
+  <div x-show="!rosterLocked" style="text-align: center; margin-bottom: 16px; font-size: 14px; color: #555; font-style: italic;">
+    <label>
+      1-card rounds at start:
+      <select @change="startCount = +$event.target.value; startCountManual = true; resizeBids()" style="margin-left: 6px; font-family: inherit; font-size: 14px; border: 1px solid #ccc; border-radius: 3px; padding: 2px 6px; background: white; cursor: pointer;">
+        <template x-for="n in oneGameOptions" :key="n">
+          <option :value="n" :selected="n === startCount" x-text="n === players.length ? n + ' (default)' : n"></option>
+        </template>
+      </select>
+    </label>
+    <span style="margin: 0 10px;">·</span>
+    <label>
+      at end:
+      <select @change="endCount = +$event.target.value; endCountManual = true; resizeBids()" style="margin-left: 6px; font-family: inherit; font-size: 14px; border: 1px solid #ccc; border-radius: 3px; padding: 2px 6px; background: white; cursor: pointer;">
+        <template x-for="n in oneGameOptions" :key="n">
+          <option :value="n" :selected="n === endCount" x-text="n === players.length ? n + ' (default)' : n"></option>
+        </template>
+      </select>
+    </label>
+  </div>
 
   <table>
     <thead>
@@ -259,6 +278,7 @@
               class="name-input"
               :placeholder="'Player ' + i"
               x-model="names[i-1]"
+              :style="nextDealerIdx === i-1 ? 'color: #4caf50;' : ''"
             >
           </th>
         </template>
@@ -294,8 +314,10 @@
                     class="trick-input"
                     min="0"
                     :max="row.cards"
+                    :data-row="rIdx"
                     :value="bids[rIdx]?.[pIdx-1] ?? ''"
                     @input="setBid(rIdx, pIdx-1, $event.target.value)"
+                    @keydown.tab.prevent="focusRowInput(rIdx, pIdx-1, $event.shiftKey ? -1 : 1)"
                   >
                   <!-- Chevron is only available once every player in this
                        row has bid AND this player already has an outcome
@@ -345,7 +367,8 @@
                         <button
                           type="button"
                           @click="setOutcome(rIdx, pIdx-1, opt.value)"
-                          x-text="opt.value === 0 ? 'c' : '-' + opt.value"
+                          :style="opt.value === 0 ? 'color: #2a7a2a; font-weight: bold;' : ''"
+                          x-text="opt.value === 0 ? '✓' : '-' + opt.value"
                           :title="opt.label"
                         ></button>
                       </template>
@@ -368,15 +391,16 @@
     <span x-text="`Enter at least ${3 - players.length} more name${(3 - players.length) === 1 ? '' : 's'} to generate the score table.`"></span>
   </div>
 
-  <div class="controls">
-    <span x-text="`${players.length} player${players.length === 1 ? '' : 's'} · ${rows.length} game${rows.length === 1 ? '' : 's'}`"></span>
-  </div>
 
 <script>
   function whist() {
     return {
       maxPlayers: 6,
       names: ['', '', '', '', '', ''],
+      startCount: 0,
+      endCount: 0,
+      startCountManual: false,
+      endCountManual: false,
       bids: [],
       scores: [],
       // Per-cell outcome: null = unset, 0 = correct, 1..cards = number of tricks missed (a "minus").
@@ -413,20 +437,36 @@
       // A divider is drawn after every n consecutive rows (so for n=3 the
       // dividers fall after rows 3, 6, 9, ...). The final row needs no
       // divider — the table's bottom border closes it.
+      get oneGameOptions() {
+        const n = this.players.length;
+        if (n < 3) return [1];
+        const opts = [];
+        for (let i = 1; i <= n * 2; i++) opts.push(i);
+        return opts;
+      },
+
       get rows() {
         const n = this.players.length;
         if (n < 3) return [];
+        const ks = this.startCount > 0 ? this.startCount : n;
+        const ke = this.endCount > 0 ? this.endCount : n;
         const out = [];
-        for (let i = 0; i < n; i++) out.push({ cards: 1 });
-        for (let c = 2; c <= 7; c++) out.push({ cards: c });
-        for (let i = 0; i < n; i++) out.push({ cards: 8 });
-        for (let c = 7; c >= 2; c--) out.push({ cards: c });
-        for (let i = 0; i < n; i++) out.push({ cards: 1 });
-        for (let i = 0; i < out.length; i++) {
-          if ((i + 1) % n === 0 && i !== out.length - 1) {
-            out[i].sectionEnd = true;
-          }
-        }
+        for (let i = 0; i < ks; i++) out.push({ cards: 1, group: 'start' });
+        for (let c = 2; c <= 7; c++) out.push({ cards: c, group: 'mid' });
+        for (let i = 0; i < n; i++) out.push({ cards: 8, group: 'eight' });
+        for (let c = 7; c >= 2; c--) out.push({ cards: c, group: 'mid2' });
+        for (let i = 0; i < ke; i++) out.push({ cards: 1, group: 'end' });
+        // Section dividers: mark the last row of each block of k consecutive rows.
+        let i = 0;
+        // start block
+        if (ks > 0) { i += ks; if (i < out.length) out[i - 1].sectionEnd = true; }
+        // 2..7 block
+        i += 6; if (i < out.length) out[i - 1].sectionEnd = true;
+        // 8-card block
+        i += n; if (i < out.length) out[i - 1].sectionEnd = true;
+        // 7..2 block
+        i += 6; if (i < out.length) out[i - 1].sectionEnd = true;
+        // end block: no divider after the last row
         return out;
       },
 
@@ -481,6 +521,19 @@
         this.autoFillCorrect(r);
         this.recalcScores();
         this.closePopup();
+        // If this row is now fully scored, focus the first bidder of the next row.
+        this.$nextTick(() => {
+          const n = this.players.length;
+          const allScored = this.outcomes[r] && this.outcomes[r].length === n &&
+            this.outcomes[r].every(v => v !== null && v !== undefined);
+          if (!allScored) return;
+          const nextRow = r + 1;
+          if (nextRow >= this.rows.length) return;
+          const dealerIdx = (n - 1 + nextRow) % n;
+          const firstBidderIdx = (dealerIdx + 1) % n;
+          const inputs = document.querySelectorAll(`[data-row="${nextRow}"]`);
+          if (inputs[firstBidderIdx]) inputs[firstBidderIdx].focus();
+        });
       },
 
       // After a user picks an outcome, check whether the already-marked
@@ -660,9 +713,32 @@
         this.recalcScores();
       },
 
+      // Index into players[] of the dealer for the next unplayed row.
+      get nextDealerIdx() {
+        const n = this.players.length;
+        if (n === 0) return -1;
+        const nextRow = this.rows.findIndex((_, r) => !this.rowComplete(r));
+        if (nextRow === -1) return -1;
+        return (n - 1 + nextRow) % n;
+      },
+
+      focusRowInput(rIdx, pIdx, dir) {
+        const n = this.players.length;
+        const next = ((pIdx + dir) % n + n) % n;
+        const inputs = document.querySelectorAll(`[data-row="${rIdx}"]`);
+        if (inputs[next]) inputs[next].focus();
+      },
+
       init() {
         this.resizeBids();
-        this.$watch('names', () => this.resizeBids());
+        this.$watch('names', () => {
+          const n = this.players.length;
+          if (!this.rosterLocked && n > 0) {
+            if (!this.startCountManual) this.startCount = n;
+            if (!this.endCountManual) this.endCount = n;
+          }
+          this.resizeBids();
+        });
       }
     };
   }

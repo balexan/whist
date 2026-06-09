@@ -89,8 +89,8 @@
     color: #fff;
     cursor: help;
   }
-  tbody tr:nth-child(even) td:not(.cards-col) {
-    background: var(--row-alt);
+  tbody tr td:not(.cards-col) {
+    background: white;
   }
   .trick-input {
     width: 56px;
@@ -141,6 +141,19 @@
   .inline-outcome button:hover {
     border-color: var(--accent);
     background: #fff4f4;
+  }
+  /* Pending auto-fill: the row has been deduced as "remaining players
+     are correct", but we hold for a few seconds so the user can still
+     click -1..-n to override. The picker's ✓ button pulses to hint
+     it's about to commit on its own. */
+  .inline-outcome.pending button:first-child {
+    background: #d8f3d8;
+    border-color: #2a7a2a;
+    animation: pendingPulse 1s ease-in-out infinite;
+  }
+  @keyframes pendingPulse {
+    0%, 100% { background: #d8f3d8; }
+    50%      { background: #a8e6a8; }
   }
   .controls {
     text-align: center;
@@ -362,7 +375,7 @@
                        the row has bid but THIS player has no outcome and
                        no score yet. -->
                   <template x-if="rowComplete(rIdx) && (outcomes[rIdx]?.[pIdx-1] === null || outcomes[rIdx]?.[pIdx-1] === undefined)">
-                    <div class="inline-outcome">
+                    <div class="inline-outcome" :class="{ pending: isPendingAutoFill(rIdx, pIdx-1) }">
                       <template x-for="opt in outcomeOptions(row.cards)" :key="opt.value">
                         <button
                           type="button"
@@ -407,6 +420,13 @@
       outcomes: [],
       // Which outcome popup is open (-1/-1 = none).
       popup: { r: -1, p: -1 },
+      // Pending auto-fill: when autoFillCorrect deduces the remaining
+      // players must all be correct, we don't commit immediately — we
+      // hold for `pendingAutoFill.ms` so the user still has a chance to
+      // click -1..-n on those players in the inline picker (e.g. when
+      // multiple players actually went under). { row, players: [pIdx], timerId, deadline }.
+      pendingAutoFill: null,
+      autoFillDelayMs: 3000,
 
       get players() {
         return this.names.map(n => (n || '').trim()).filter(n => n.length > 0);
@@ -475,6 +495,11 @@
         this.bids[r][p] = val === '' ? null : Number(val);
         // Editing a bid invalidates the previously chosen outcome.
         if (this.outcomes[r]) this.outcomes[r][p] = null;
+        // A bid edit on a row with a pending auto-fill invalidates that
+        // deduction — the math is about to change.
+        if (this.pendingAutoFill && this.pendingAutoFill.row === r) {
+          this.cancelPendingAutoFill();
+        }
         this.recalcScores();
       },
 
@@ -516,6 +541,14 @@
       },
 
       setOutcome(r, p, value) {
+        // Any outcome click on a row that's currently in the auto-fill
+        // grace window resets the 3-second timer — the user is clearly
+        // still deciding. We cancel the pending state here; if after the
+        // click the row is still pinned with unset players, autoFillCorrect
+        // will re-arm a fresh timer from the new state.
+        if (this.pendingAutoFill && this.pendingAutoFill.row === r) {
+          this.cancelPendingAutoFill();
+        }
         if (!this.outcomes[r]) this.outcomes[r] = [];
         this.outcomes[r][p] = value;
         this.autoFillCorrect(r);
@@ -594,8 +627,65 @@
           feasible = !!reachable[target];
         }
         if (feasible) {
-          for (const p of unset) outs[p] = 0;
+          // Defer the auto-fill: keep the inline picker visible on the
+          // unset players for a short grace period so the user can still
+          // override (e.g., a second player also went under). If they
+          // touch one of those cells we cancel the timer in setOutcome.
+          this.schedulePendingAutoFill(r, unset);
         }
+      },
+
+      // Mark `players` in row `r` as pending auto-fill-to-correct, and
+      // arm a timer to commit them after `autoFillDelayMs`. Cancels any
+      // prior pending fill (only one row is ever pending at a time —
+      // moving on cancels by virtue of the row check).
+      schedulePendingAutoFill(r, players) {
+        this.cancelPendingAutoFill();
+        const timerId = setTimeout(() => this.commitPendingAutoFill(), this.autoFillDelayMs);
+        this.pendingAutoFill = { row: r, players: [...players], timerId };
+      },
+
+      cancelPendingAutoFill() {
+        if (this.pendingAutoFill) {
+          clearTimeout(this.pendingAutoFill.timerId);
+          this.pendingAutoFill = null;
+        }
+      },
+
+      commitPendingAutoFill() {
+        const pending = this.pendingAutoFill;
+        if (!pending) return;
+        this.pendingAutoFill = null;
+        const r = pending.row;
+        if (!this.outcomes[r]) this.outcomes[r] = [];
+        for (const p of pending.players) {
+          if (this.outcomes[r][p] === null || this.outcomes[r][p] === undefined) {
+            this.outcomes[r][p] = 0;
+          }
+        }
+        this.recalcScores();
+        // Try to advance focus to the next row's first bidder, mirroring
+        // what setOutcome does when a row finishes.
+        this.$nextTick(() => {
+          const n = this.players.length;
+          const allScored = this.outcomes[r] && this.outcomes[r].length === n &&
+            this.outcomes[r].every(v => v !== null && v !== undefined);
+          if (!allScored) return;
+          const nextRow = r + 1;
+          if (nextRow >= this.rows.length) return;
+          const dealerIdx = (n - 1 + nextRow) % n;
+          const firstBidderIdx = (dealerIdx + 1) % n;
+          const inputs = document.querySelectorAll(`[data-row="${nextRow}"]`);
+          if (inputs[firstBidderIdx]) inputs[firstBidderIdx].focus();
+        });
+      },
+
+      // True when player p in row r is currently held in the auto-fill
+      // grace window — outcome is still null but auto-fill is pending.
+      isPendingAutoFill(r, p) {
+        return !!(this.pendingAutoFill &&
+          this.pendingAutoFill.row === r &&
+          this.pendingAutoFill.players.includes(p));
       },
 
       // Romanian Whist forbids the bids from summing to exactly the number

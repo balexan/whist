@@ -260,7 +260,7 @@
 <body x-data="whist()" x-init="init()">
   <h1 x-show="!rosterLocked">ROMANIAN WHIST</h1>
   <div class="subtitle" x-show="!rosterLocked">Enter 3 to 6 player names below to begin</div>
-  <div x-show="!rosterLocked" style="text-align: center; margin-bottom: 16px; font-size: 14px; color: #555; font-style: italic;">
+  <div x-show="players.length >= 3 && !rosterLocked" style="text-align: center; margin-bottom: 16px; font-size: 14px; color: #555; font-style: italic;">
     <label>
       1-card rounds at start:
       <select @change="startCount = +$event.target.value; startCountManual = true; resizeBids()" style="margin-left: 6px; font-family: inherit; font-size: 14px; border: 1px solid #ccc; border-radius: 3px; padding: 2px 6px; background: white; cursor: pointer;">

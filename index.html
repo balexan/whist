@@ -329,8 +329,8 @@
                     :max="row.cards"
                     :data-row="rIdx"
                     :value="bids[rIdx]?.[pIdx-1] ?? ''"
-                    @input="setBid(rIdx, pIdx-1, $event.target.value)"
-                    @keydown.tab.prevent="focusRowInput(rIdx, pIdx-1, $event.shiftKey ? -1 : 1)"
+                    @keydown="handleBidKey(rIdx, pIdx-1, $event)"
+                    @focus="$event.target.select()"
                   >
                   <!-- Chevron is only available once every player in this
                        row has bid AND this player already has an outcome
@@ -492,7 +492,8 @@
 
       setBid(r, p, val) {
         if (!this.bids[r]) this.bids[r] = [];
-        this.bids[r][p] = val === '' ? null : Number(val);
+        const num = val === '' ? null : Number(val);
+        this.bids[r][p] = num;
         // Editing a bid invalidates the previously chosen outcome.
         if (this.outcomes[r]) this.outcomes[r][p] = null;
         // A bid edit on a row with a pending auto-fill invalidates that
@@ -817,6 +818,50 @@
         const next = ((pIdx + dir) % n + n) % n;
         const inputs = document.querySelectorAll(`[data-row="${rIdx}"]`);
         if (inputs[next]) inputs[next].focus();
+      },
+
+      handleBidKey(r, p, e) {
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          this.focusRowInput(r, p, e.shiftKey ? -1 : 1);
+          return;
+        }
+        // Digit keys 0–8: set the bid to that digit and advance.
+        if (/^[0-8]$/.test(e.key)) {
+          e.preventDefault();
+          const num = Number(e.key);
+          this.setBid(r, p, num <= this.rows[r].cards ? String(num) : String(this.rows[r].cards));
+          this.focusRowInput(r, p, 1);
+          return;
+        }
+        // Letter shortcut: once every bid in this row is in, a letter key
+        // matches the first player whose name starts with it (case-
+        // insensitive) and cycles that player's outcome:
+        //   null → -1 → -2 → … → -cards → 0 → -1 → …
+        // First-match-wins on duplicate initials.
+        if (/^[a-zA-Z]$/.test(e.key) && this.rowComplete(r)) {
+          const letter = e.key.toLowerCase();
+          const players = this.players;
+          const match = players.findIndex(name => name[0].toLowerCase() === letter);
+          if (match !== -1) {
+            e.preventDefault();
+            this.cycleOutcome(r, match);
+          }
+        }
+      },
+
+      // Advance the outcome of (r, p) one step through the cycle:
+      //   null → -1 → -2 → … → -cards → 0 → -1 → …
+      // After 0, the next press starts the misses again at -1.
+      cycleOutcome(r, p) {
+        const cards = this.rows[r].cards;
+        const cur = this.outcomes[r]?.[p];
+        let next;
+        if (cur === null || cur === undefined) next = 1;          // → -1
+        else if (cur === 0) next = 1;                              // 0 → -1
+        else if (cur >= cards) next = 0;                           // max miss → correct
+        else next = cur + 1;                                       // -k → -(k+1)
+        this.setOutcome(r, p, next);
       },
 
       init() {

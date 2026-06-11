@@ -127,6 +127,7 @@
     width: 70px;
     color: #888;
     font-style: italic;
+    font-size: 20px;
   }
   /* A computed score is shown plainly, no italics. */
   .score-cell.has-value {
@@ -438,13 +439,12 @@
       outcomes: [],
       // Which outcome popup is open (-1/-1 = none).
       popup: { r: -1, p: -1 },
-      // Pending auto-fill: when autoFillCorrect deduces the remaining
-      // players must all be correct, we don't commit immediately — we
-      // hold for `pendingAutoFill.ms` so the user still has a chance to
-      // click -1..-n on those players in the inline picker (e.g. when
-      // multiple players actually went under). { row, players: [pIdx], timerId, deadline }.
-      pendingAutoFill: null,
-      autoFillDelayMs: 3000,
+      // Rows where the unset players are mathematically pinned to "correct"
+      // (everyone else's outcomes already determine the trick total). The
+      // user commits these by pressing Enter while focused on a bid input
+      // in that row; until then the inline picker stays visible and the
+      // ✓ button pulses as a hint. Map of rowIndex → array of unset pIdx.
+      pendingAutoFill: {},
 
       get players() {
         return this.names.map(n => (n || '').trim()).filter(n => n.length > 0);
@@ -514,11 +514,9 @@
         this.bids[r][p] = num;
         // Editing a bid invalidates the previously chosen outcome.
         if (this.outcomes[r]) this.outcomes[r][p] = null;
-        // A bid edit on a row with a pending auto-fill invalidates that
-        // deduction — the math is about to change.
-        if (this.pendingAutoFill && this.pendingAutoFill.row === r) {
-          this.cancelPendingAutoFill();
-        }
+        // Bid edits invalidate any pending auto-fill on this row — the
+        // math is about to change.
+        if (this.pendingAutoFill[r]) delete this.pendingAutoFill[r];
         this.recalcScores();
       },
 
@@ -560,14 +558,10 @@
       },
 
       setOutcome(r, p, value) {
-        // Any outcome click on a row that's currently in the auto-fill
-        // grace window resets the 3-second timer — the user is clearly
-        // still deciding. We cancel the pending state here; if after the
-        // click the row is still pinned with unset players, autoFillCorrect
-        // will re-arm a fresh timer from the new state.
-        if (this.pendingAutoFill && this.pendingAutoFill.row === r) {
-          this.cancelPendingAutoFill();
-        }
+        // Editing an outcome on this row invalidates any cached pending
+        // auto-fill — autoFillCorrect below will recompute it from the
+        // new state.
+        if (this.pendingAutoFill[r]) delete this.pendingAutoFill[r];
         if (!this.outcomes[r]) this.outcomes[r] = [];
         this.outcomes[r][p] = value;
         this.autoFillCorrect(r);
@@ -646,45 +640,28 @@
           feasible = !!reachable[target];
         }
         if (feasible) {
-          // Defer the auto-fill: keep the inline picker visible on the
-          // unset players for a short grace period so the user can still
-          // override (e.g., a second player also went under). If they
-          // touch one of those cells we cancel the timer in setOutcome.
-          this.schedulePendingAutoFill(r, unset);
+          // Record that this row's unset players are pinned to "correct".
+          // We don't commit yet — the inline picker stays visible so the
+          // user can still override (e.g., another player also went under).
+          // Commit happens when the user presses Enter on a bid input in
+          // this row, via commitPendingAutoFill().
+          this.pendingAutoFill[r] = [...unset];
         }
       },
 
-      // Mark `players` in row `r` as pending auto-fill-to-correct, and
-      // arm a timer to commit them after `autoFillDelayMs`. Cancels any
-      // prior pending fill (only one row is ever pending at a time —
-      // moving on cancels by virtue of the row check).
-      schedulePendingAutoFill(r, players) {
-        this.cancelPendingAutoFill();
-        const timerId = setTimeout(() => this.commitPendingAutoFill(), this.autoFillDelayMs);
-        this.pendingAutoFill = { row: r, players: [...players], timerId };
-      },
-
-      cancelPendingAutoFill() {
-        if (this.pendingAutoFill) {
-          clearTimeout(this.pendingAutoFill.timerId);
-          this.pendingAutoFill = null;
-        }
-      },
-
-      commitPendingAutoFill() {
-        const pending = this.pendingAutoFill;
-        if (!pending) return;
-        this.pendingAutoFill = null;
-        const r = pending.row;
+      commitPendingAutoFill(r) {
+        const players = this.pendingAutoFill[r];
+        if (!players || !players.length) return false;
+        delete this.pendingAutoFill[r];
         if (!this.outcomes[r]) this.outcomes[r] = [];
-        for (const p of pending.players) {
+        for (const p of players) {
           if (this.outcomes[r][p] === null || this.outcomes[r][p] === undefined) {
             this.outcomes[r][p] = 0;
           }
         }
         this.recalcScores();
-        // Try to advance focus to the next row's first bidder, mirroring
-        // what setOutcome does when a row finishes.
+        // Advance focus to the next row's first bidder once the row is
+        // fully scored — same as setOutcome does on a final outcome click.
         this.$nextTick(() => {
           const n = this.players.length;
           const allScored = this.outcomes[r] && this.outcomes[r].length === n &&
@@ -697,14 +674,14 @@
           const inputs = document.querySelectorAll(`[data-row="${nextRow}"]`);
           if (inputs[firstBidderIdx]) inputs[firstBidderIdx].focus();
         });
+        return true;
       },
 
-      // True when player p in row r is currently held in the auto-fill
-      // grace window — outcome is still null but auto-fill is pending.
+      // True when player p in row r is pinned to "correct" but not yet
+      // committed — outcome is still null and the inline picker is showing
+      // the pulse hint that pressing Enter will commit it.
       isPendingAutoFill(r, p) {
-        return !!(this.pendingAutoFill &&
-          this.pendingAutoFill.row === r &&
-          this.pendingAutoFill.players.includes(p));
+        return !!(this.pendingAutoFill[r] && this.pendingAutoFill[r].includes(p));
       },
 
       // Romanian Whist forbids the bids from summing to exactly the number
@@ -844,11 +821,29 @@
           this.focusRowInput(r, p, e.shiftKey ? -1 : 1);
           return;
         }
-        // Digit keys 0–8: set the bid to that digit and advance.
+        // Enter commits a pending auto-fill on this row, if there is one.
+        // (Replaces the old 3-second timer.) If nothing's pending it's a no-op.
+        if (e.key === 'Enter') {
+          if (this.pendingAutoFill[r]) {
+            e.preventDefault();
+            this.commitPendingAutoFill(r);
+          }
+          return;
+        }
+        // Digit keys 0–8: set the bid to that digit and advance. Digits
+        // that exceed the row's card count are ignored entirely (no
+        // clamping — the keypress is treated as if it never happened).
         if (/^[0-8]$/.test(e.key)) {
           e.preventDefault();
           const num = Number(e.key);
-          this.setBid(r, p, num <= this.rows[r].cards ? String(num) : String(this.rows[r].cards));
+          if (num > this.rows[r].cards) return;
+          // Force-sync the DOM input too. Alpine's :value won't push a
+          // re-render if the bound value didn't actually change (e.g.,
+          // when the user previously typed a stray letter that blanked
+          // the input but state still holds the same number) — so we
+          // update the element directly before delegating to setBid.
+          e.target.value = String(num);
+          this.setBid(r, p, String(num));
           this.focusRowInput(r, p, 1);
           return;
         }
@@ -857,13 +852,16 @@
         // insensitive) and cycles that player's outcome:
         //   null → -1 → -2 → … → -cards → 0 → -1 → …
         // First-match-wins on duplicate initials.
-        if (/^[a-zA-Z]$/.test(e.key) && this.rowComplete(r)) {
-          const letter = e.key.toLowerCase();
-          const players = this.players;
-          const match = players.findIndex(name => name[0].toLowerCase() === letter);
-          if (match !== -1) {
-            e.preventDefault();
-            this.cycleOutcome(r, match);
+        if (/^[a-zA-Z]$/.test(e.key)) {
+          // Always swallow letters in a bid input — a number field would
+          // otherwise blank itself on any non-numeric key. We only act on
+          // them once the row's bids are all in.
+          e.preventDefault();
+          if (this.rowComplete(r)) {
+            const letter = e.key.toLowerCase();
+            const players = this.players;
+            const match = players.findIndex(name => name[0].toLowerCase() === letter);
+            if (match !== -1) this.cycleOutcome(r, match);
           }
         }
       },

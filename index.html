@@ -35,6 +35,17 @@
     color: #555;
     font-style: italic;
   }
+  /* Scroll container for the table. Putting the scroll on this wrapper
+     instead of the body makes `position: sticky` on the thead work
+     reliably across browser zoom levels — sticky tracks the nearest
+     scrolling ancestor, and a single wrapper that handles both axes is
+     a predictable context. We size it to the viewport (minus body
+     padding + the controls block above) so the names header stays
+     pinned while only the rounds scroll. */
+  .table-scroll {
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+  }
   table {
     border-collapse: separate;
     border-spacing: 0;
@@ -299,10 +310,11 @@
     </label>
   </div>
 
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
-        <th class="cards-col" rowspan="2">Cards</th>
+        <th class="cards-col" rowspan="2"></th>
         <template x-for="i in visibleSlotCount" :key="'name-'+i">
           <th class="name-cell player-start" colspan="2">
             <input
@@ -418,6 +430,7 @@
       </template>
     </tbody>
   </table>
+  </div>
 
   <div x-show="players.length < 3" class="empty-msg">
     <span x-text="`Enter at least ${3 - players.length} more name${(3 - players.length) === 1 ? '' : 's'} to generate the score table.`"></span>
@@ -896,10 +909,29 @@
         const syncHeaderH = () => {
           const nameRow = document.querySelector('thead tr:first-child');
           if (!nameRow) return;
-          document.documentElement.style.setProperty('--header-h', nameRow.offsetHeight + 'px');
+          // getBoundingClientRect picks up sub-pixel sizes — important on
+          // zoom, where offsetHeight rounds and the sub-header can drift
+          // a pixel above or below the name row, leaving a gap or overlap.
+          const h = nameRow.getBoundingClientRect().height;
+          document.documentElement.style.setProperty('--header-h', h + 'px');
         };
         syncHeaderH();
+        // ResizeObserver fires on any layout change to the name row —
+        // browser zoom, font scaling, name wrapping, devtools docking.
+        // More reliable than the `resize` event, which some browsers
+        // skip for zoom-only changes (and which fires before layout
+        // has fully settled at the new scale).
+        const nameRow = document.querySelector('thead tr:first-child');
+        if (nameRow && typeof ResizeObserver !== 'undefined') {
+          new ResizeObserver(syncHeaderH).observe(nameRow);
+        }
+        // Belt-and-braces fallbacks for browsers that don't fire RO on zoom.
         window.addEventListener('resize', syncHeaderH);
+        // visualViewport scales with pinch-zoom on mobile and reports
+        // pinch state via its own resize event.
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', syncHeaderH);
+        }
         // Names/roster changes can resize the header — re-measure next tick.
         this.$watch('names', () => this.$nextTick(syncHeaderH));
         this.$watch('rows', () => this.$nextTick(syncHeaderH));

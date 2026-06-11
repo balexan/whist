@@ -36,21 +36,39 @@
     font-style: italic;
   }
   table {
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     margin: 0 auto;
     background: white;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   }
   th, td {
     border: 1px solid var(--border);
+    /* With border-collapse: separate, neighbouring cells would otherwise
+       double up borders. Drop the top border on every row past the first
+       and rely on the row above's bottom edge. */
+    border-top: none;
+    border-left: none;
     padding: 6px 8px;
     text-align: center;
   }
+  /* Re-add the very-top and very-left edges that border-top/left:none drops. */
+  thead tr:first-child th { border-top: 1px solid var(--border); }
+  th:first-child, td:first-child { border-left: 1px solid var(--border); }
   thead th {
     background: var(--header-bg);
     color: var(--header-fg);
     padding: 8px;
+    /* Pin the name + bid/score sub-header rows to the top of the
+       viewport so they stay visible while the body scrolls. */
+    position: sticky;
+    z-index: 10;
   }
+  thead tr:first-child th { top: 0; }
+  /* The sub-header sits directly under the name row. We size it after
+     paint via JS (--header-h) so it stacks flush regardless of name
+     font/wrap. Fallback uses the unwrapped 26px name input + padding. */
+  thead tr.sub-header th { top: var(--header-h, 56px); }
   .name-input {
     font-size: 26px;
     font-weight: bold;
@@ -874,6 +892,19 @@
           }
           this.resizeBids();
         });
+        // Keep the sub-header's `top` offset in sync with the actual
+        // rendered height of the name row, so the two sticky rows stack
+        // flush even if names wrap or the user zooms.
+        const syncHeaderH = () => {
+          const nameRow = document.querySelector('thead tr:first-child');
+          if (!nameRow) return;
+          document.documentElement.style.setProperty('--header-h', nameRow.offsetHeight + 'px');
+        };
+        syncHeaderH();
+        window.addEventListener('resize', syncHeaderH);
+        // Names/roster changes can resize the header — re-measure next tick.
+        this.$watch('names', () => this.$nextTick(syncHeaderH));
+        this.$watch('rows', () => this.$nextTick(syncHeaderH));
       }
     };
   }
